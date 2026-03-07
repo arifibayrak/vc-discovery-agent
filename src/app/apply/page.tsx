@@ -1,15 +1,54 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 
 type Step = "choose" | "form" | "upload" | "processing" | "follow-ups" | "done";
+
+type FollowUpQuestion = { id: string; question: string; context: string; field_name: string; status: string; answer?: string };
 
 type Submission = {
   id: string; company_name: string; status: string;
   files?: { id: string; file_name: string; size_bytes: number }[];
   extraction?: { status: string; industry?: string; stage?: string; funding_ask_usd?: number };
-  follow_up_questions?: { id: string; question: string; context: string; field_name: string; status: string; answer?: string }[];
+  follow_up_questions?: FollowUpQuestion[];
   summary?: { score: number; recommendation: string; executive_summary: string };
+};
+
+/* ── dropdown option sets ── */
+const STAGES = ["Pre-Seed", "Seed", "Series A", "Series B", "Series C", "Series D+", "Growth"];
+const INDUSTRIES = [
+  "SaaS / Software", "FinTech", "HealthTech / MedTech", "EdTech", "AI / Machine Learning",
+  "E-Commerce / Retail", "MarTech / AdTech", "PropTech / Real Estate", "LegalTech",
+  "CleanTech / GreenTech", "FoodTech / AgriTech", "LogTech / Supply Chain",
+  "InsurTech", "CyberSecurity", "DevTools / Infrastructure", "Web3 / Crypto",
+  "HRTech / Future of Work", "TravelTech / Hospitality", "Gaming / Entertainment",
+  "BioTech / Life Sciences", "SpaceTech", "Robotics / Hardware", "GovTech",
+  "Social / Community", "Other",
+];
+const FUNDING_RANGES = [
+  "$50K–$250K", "$250K–$500K", "$500K–$1M",
+  "$1M–$3M", "$3M–$10M", "$10M–$25M", "$25M–$50M", "$50M+",
+];
+const REVENUE_RANGES = [
+  "Pre-revenue ($0)", "$1–$50K", "$50K–$250K",
+  "$250K–$1M", "$1M–$5M", "$5M–$20M", "$20M+",
+];
+const BURN_RANGES = [
+  "<$10K / month", "$10K–$30K / month", "$30K–$75K / month",
+  "$75K–$150K / month", "$150K–$500K / month", "$500K+ / month",
+];
+const TEAM_SIZES = ["1–3", "4–10", "11–25", "26–50", "51–100", "100+"];
+const CURRENT_YEAR = new Date().getFullYear();
+const YEARS = Array.from({ length: CURRENT_YEAR - 1989 }, (_, i) => CURRENT_YEAR - i);
+
+const TEXT_PLACEHOLDERS: Record<string, string> = {
+  problem_statement: "e.g. SMBs spend 10+ hours/week on manual invoicing due to lack of affordable automation…",
+  solution_description: "e.g. An AI-powered invoicing tool that auto-reconciles transactions in real time, cutting workload by 80%…",
+  target_market: "e.g. 2M SMBs in the UK. TAM $4B, SAM $800M, SOM $50M over 3 years…",
+  business_model: "e.g. SaaS subscription at £99/month, annual contracts, NRR 120%, CAC £300, LTV £3.6K…",
+  traction_summary: "e.g. 500 paying customers, £250K ARR, 30% MoM growth, 3 enterprise pilots signed…",
+  competitive_landscape: "e.g. vs Xero (no AI, expensive), vs Sage (complex), our edge: 10x faster setup, AI-native…",
+  use_of_funds: "e.g. 50% engineering (3 hires), 30% sales & marketing, 20% ops. Runway: 18 months…",
 };
 
 export default function ApplyPage() {
@@ -19,6 +58,126 @@ export default function ApplyPage() {
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ company_name: "", contact_name: "", contact_email: "" });
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [reuploadStatus, setReuploadStatus] = useState<Record<string, "idle" | "uploading" | "done">>({});
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  function setAnswer(qid: string, val: string) {
+    setAnswers(prev => ({ ...prev, [qid]: val }));
+  }
+
+  async function handlePitchReupload(qid: string, file: File) {
+    if (!sub) return;
+    setReuploadStatus(prev => ({ ...prev, [qid]: "uploading" }));
+    const fd = new FormData();
+    fd.append("file", file);
+    fd.append("file_type", "pitch_deck");
+    await fetch(`/api/submissions/${sub.id}/files`, { method: "POST", body: fd });
+    setAnswer(qid, `Pitch deck re-uploaded: ${file.name}`);
+    setReuploadStatus(prev => ({ ...prev, [qid]: "done" }));
+    await refresh(sub.id);
+  }
+
+  function renderAnswerInput(q: FollowUpQuestion) {
+    const val = answers[q.id] ?? "";
+
+    /* ── Pitch deck re-upload ── */
+    if (q.field_name === "is_pitch_deck") {
+      const status = reuploadStatus[q.id] ?? "idle";
+      return (
+        <div>
+          <input ref={fileInputRef} type="file" accept=".pdf,.pptx,.ppt"
+            style={{ display: "none" }}
+            onChange={e => { const f = e.target.files?.[0]; if (f) handlePitchReupload(q.id, f); }} />
+          {status === "done" ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 8, background: "#d1fae5", border: "1px solid #6ee7b7", fontSize: 13 }}>
+              <span style={{ color: "var(--green)", fontWeight: 700 }}>✓</span>
+              <span style={{ color: "#065f46" }}>{val}</span>
+            </div>
+          ) : (
+            <button className="btn btn-secondary" style={{ width: "100%", padding: "18px", border: "2px dashed var(--border)", background: "#fafafa" }}
+              disabled={status === "uploading"}
+              onClick={() => fileInputRef.current?.click()}>
+              {status === "uploading" ? "⏳ Uploading…" : "📎 Click to upload your pitch deck (PDF or PPTX)"}
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    /* ── Dropdowns ── */
+    if (q.field_name === "stage") return (
+      <select className="input" value={val} onChange={e => setAnswer(q.id, e.target.value)}>
+        <option value="">Select funding stage…</option>
+        {STAGES.map(s => <option key={s} value={s}>{s}</option>)}
+      </select>
+    );
+
+    if (q.field_name === "industry") return (
+      <select className="input" value={val} onChange={e => setAnswer(q.id, e.target.value)}>
+        <option value="">Select industry…</option>
+        {INDUSTRIES.map(s => <option key={s} value={s}>{s}</option>)}
+      </select>
+    );
+
+    if (q.field_name === "funding_ask_usd") return (
+      <select className="input" value={val} onChange={e => setAnswer(q.id, e.target.value)}>
+        <option value="">Select funding range…</option>
+        {FUNDING_RANGES.map(s => <option key={s} value={s}>{s}</option>)}
+      </select>
+    );
+
+    if (q.field_name === "revenue_annual_usd") return (
+      <select className="input" value={val} onChange={e => setAnswer(q.id, e.target.value)}>
+        <option value="">Select annual revenue…</option>
+        {REVENUE_RANGES.map(s => <option key={s} value={s}>{s}</option>)}
+      </select>
+    );
+
+    if (q.field_name === "burn_rate_monthly_usd") return (
+      <select className="input" value={val} onChange={e => setAnswer(q.id, e.target.value)}>
+        <option value="">Select monthly burn rate…</option>
+        {BURN_RANGES.map(s => <option key={s} value={s}>{s}</option>)}
+      </select>
+    );
+
+    if (q.field_name === "team_size") return (
+      <select className="input" value={val} onChange={e => setAnswer(q.id, e.target.value)}>
+        <option value="">Select team size…</option>
+        {TEAM_SIZES.map(s => <option key={s} value={s}>{s} employees</option>)}
+      </select>
+    );
+
+    if (q.field_name === "founded_year") return (
+      <select className="input" value={val} onChange={e => setAnswer(q.id, e.target.value)}>
+        <option value="">Select year founded…</option>
+        {YEARS.map(y => <option key={y} value={String(y)}>{y}</option>)}
+      </select>
+    );
+
+    /* ── Short text inputs ── */
+    if (q.field_name === "location") return (
+      <input className="input" type="text" placeholder="e.g. London, UK"
+        value={val} onChange={e => setAnswer(q.id, e.target.value)} />
+    );
+
+    if (q.field_name === "website_url") return (
+      <input className="input" type="url" placeholder="https://yourcompany.com"
+        value={val} onChange={e => setAnswer(q.id, e.target.value)} />
+    );
+
+    /* ── Long text / textarea (default) ── */
+    const placeholder = TEXT_PLACEHOLDERS[q.field_name] ?? "Your answer…";
+    return (
+      <div>
+        <textarea className="textarea" placeholder={placeholder}
+          value={val} onChange={e => setAnswer(q.id, e.target.value)}
+          style={{ minHeight: 100 }} />
+        <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 4, textAlign: "right" }}>
+          {val.length} / 2000 characters
+        </p>
+      </div>
+    );
+  }
 
   const refresh = useCallback(async (id: string) => {
     const r = await fetch(`/api/submissions/${id}`);
@@ -300,14 +459,12 @@ export default function ApplyPage() {
                 We couldn&apos;t find some information in your documents. Please answer these to complete your application.
               </p>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
                 {sub.follow_up_questions?.filter(q => q.status === "pending").map(q => (
-                  <div key={q.id}>
-                    <label className="label">{q.question}</label>
-                    {q.context && <p className="hint" style={{ marginBottom: 6 }}>{q.context}</p>}
-                    <textarea className="textarea" placeholder="Your answer…"
-                      value={answers[q.id] ?? ""}
-                      onChange={e => setAnswers({ ...answers, [q.id]: e.target.value })} />
+                  <div key={q.id} style={{ borderBottom: "1px solid var(--border-light)", paddingBottom: 20 }}>
+                    <label className="label" style={{ marginBottom: 4 }}>{q.question}</label>
+                    {q.context && <p className="hint" style={{ marginBottom: 8 }}>{q.context}</p>}
+                    {renderAnswerInput(q)}
                   </div>
                 ))}
               </div>
