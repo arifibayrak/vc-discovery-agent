@@ -49,10 +49,11 @@ function buildMailto(to: string, subject: string, body: string) {
 }
 
 export default function AdminPage() {
-  const [list, setList]     = useState<Submission[]>([]);
-  const [sel, setSel]       = useState<Submission | null>(null);
-  const [busy, setBusy]     = useState("");
-  const [filter, setFilter] = useState<string>("all");
+  const [list, setList]         = useState<Submission[]>([]);
+  const [sel, setSel]           = useState<Submission | null>(null);
+  const [busy, setBusy]         = useState("");
+  const [filter, setFilter]     = useState<string>("all");
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const url = filter === "all"
@@ -76,6 +77,15 @@ export default function AdminPage() {
     setBusy(tag);
     await fetch(`/api/submissions/${id}/${path}`, { method: "POST" });
     await detail(id);
+    await load();
+    setBusy("");
+  }
+
+  async function doDelete(id: string) {
+    setBusy("delete-" + id);
+    await fetch(`/api/submissions/${id}`, { method: "DELETE" });
+    if (sel?.id === id) setSel(null);
+    setDeleteConfirm(null);
     await load();
     setBusy("");
   }
@@ -123,14 +133,38 @@ export default function AdminPage() {
         }}>
           {list.map(sub => {
             const st = STATUS[sub.status] ?? STATUS.draft;
+            const isDeleting = busy === "delete-" + sub.id;
+            const confirmingDelete = deleteConfirm === sub.id;
             return (
-              <div key={sub.id} onClick={() => detail(sub.id)} className="card" style={{
-                cursor: "pointer", padding: "14px 16px",
+              <div key={sub.id} onClick={() => { if (!confirmingDelete) detail(sub.id); }} className="card" style={{
+                cursor: confirmingDelete ? "default" : "pointer", padding: "14px 16px",
                 transition: "box-shadow 0.12s, border-color 0.12s",
+                outline: confirmingDelete ? "2px solid #fca5a5" : undefined,
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 8 }}>
                   <strong style={{ fontSize: 14 }}>{sub.company_name}</strong>
-                  <span className="badge" style={{ background: st.bg, color: st.fg, flexShrink: 0 }}>{st.label}</span>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+                    <span className="badge" style={{ background: st.bg, color: st.fg }}>{st.label}</span>
+                    {confirmingDelete ? (
+                      <>
+                        <button
+                          onClick={e => { e.stopPropagation(); doDelete(sub.id); }}
+                          disabled={isDeleting}
+                          style={{ fontSize: 11, padding: "2px 8px", borderRadius: 4, border: "1px solid var(--red)", background: "#fef2f2", color: "var(--red)", cursor: "pointer", fontWeight: 700 }}
+                        >{isDeleting ? "…" : "Confirm"}</button>
+                        <button
+                          onClick={e => { e.stopPropagation(); setDeleteConfirm(null); }}
+                          style={{ fontSize: 11, padding: "2px 6px", borderRadius: 4, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--muted)", cursor: "pointer" }}
+                        >Cancel</button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={e => { e.stopPropagation(); setDeleteConfirm(sub.id); }}
+                        title="Delete submission"
+                        style={{ fontSize: 13, padding: "1px 5px", borderRadius: 4, border: "none", background: "none", color: "var(--muted)", cursor: "pointer", lineHeight: 1 }}
+                      >🗑</button>
+                    )}
+                  </div>
                 </div>
                 <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3 }}>
                   {sub.contact_name} · {new Date(sub.created_at).toLocaleDateString()}
@@ -179,14 +213,36 @@ export default function AdminPage() {
                 <h2 style={{ fontSize: 18, fontWeight: 700, letterSpacing: "-0.02em" }}>{s.company_name}</h2>
                 {(() => { const st = STATUS[s.status] ?? STATUS.draft; return <span className="badge" style={{ background: st.bg, color: st.fg }}>{st.label}</span>; })()}
               </div>
-              <button
-                onClick={() => setSel(null)}
-                style={{
-                  background: "none", border: "none", cursor: "pointer",
-                  fontSize: 20, color: "var(--muted)", lineHeight: 1, padding: "4px 8px",
-                  borderRadius: 6,
-                }}
-              >×</button>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {deleteConfirm === s.id ? (
+                  <>
+                    <span style={{ fontSize: 12, color: "var(--red)" }}>Delete this record?</span>
+                    <button
+                      onClick={() => doDelete(s.id)}
+                      disabled={busy === "delete-" + s.id}
+                      style={{ fontSize: 12, padding: "4px 12px", borderRadius: 6, border: "1px solid var(--red)", background: "#fef2f2", color: "var(--red)", cursor: "pointer", fontWeight: 700 }}
+                    >{busy === "delete-" + s.id ? "Deleting…" : "Confirm Delete"}</button>
+                    <button
+                      onClick={() => setDeleteConfirm(null)}
+                      style={{ fontSize: 12, padding: "4px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--muted)", cursor: "pointer" }}
+                    >Cancel</button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => setDeleteConfirm(s.id)}
+                    style={{ fontSize: 13, padding: "5px 10px", borderRadius: 6, border: "1px solid var(--border)", background: "var(--bg)", color: "var(--muted)", cursor: "pointer" }}
+                    title="Delete this submission"
+                  >🗑 Delete</button>
+                )}
+                <button
+                  onClick={() => { setSel(null); setDeleteConfirm(null); }}
+                  style={{
+                    background: "none", border: "none", cursor: "pointer",
+                    fontSize: 20, color: "var(--muted)", lineHeight: 1, padding: "4px 8px",
+                    borderRadius: 6,
+                  }}
+                >×</button>
+              </div>
             </div>
 
             {/* loading state */}

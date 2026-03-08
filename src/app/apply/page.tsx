@@ -71,6 +71,14 @@ export default function ApplyPage() {
     setAnswers(prev => ({ ...prev, [qid]: val }));
   }
 
+  async function deleteUploadedFile(fileId: string) {
+    if (!sub?.id) return;
+    setBusy(true);
+    await fetch(`/api/submissions/${sub.id}/files/${fileId}`, { method: "DELETE" });
+    await refresh(sub.id);
+    setBusy(false);
+  }
+
   async function handlePitchReupload(qid: string, file: File) {
     if (!sub?.id) return;
     setReuploadStatus(prev => ({ ...prev, [qid]: "uploading" }));
@@ -473,70 +481,92 @@ export default function ApplyPage() {
           <div className="fade-up">
             <StepIndicator current={2} />
             <div className="card">
-              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Upload Documents</h3>
+              <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Upload Your Pitch Deck</h3>
               <p style={{ fontSize: 13, color: "var(--muted)", marginBottom: 16 }}>
-                Upload your pitch deck, financial model, or other relevant documents.
+                Upload one file (PDF or PPTX preferred). To replace it, remove the current file first.
               </p>
 
-              {/* tab switcher */}
-              <div style={{ display: "flex", gap: 0, marginBottom: 14, border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", width: "fit-content" }}>
-                {(["file", "link"] as const).map(t => (
-                  <button key={t} onClick={() => { setUploadTab(t); setLinkError(""); }}
-                    style={{ padding: "7px 18px", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer",
-                      background: uploadTab === t ? "var(--fg)" : "var(--bg)", color: uploadTab === t ? "var(--bg)" : "var(--muted)" }}>
-                    {t === "file" ? "📁 Upload File" : "🔗 Paste Link"}
-                  </button>
-                ))}
-              </div>
+              {/* Upload zone — only when no file uploaded yet */}
+              {(!sub.files || sub.files.length === 0) && (
+                <>
+                  {/* tab switcher */}
+                  <div style={{ display: "flex", gap: 0, marginBottom: 14, border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", width: "fit-content" }}>
+                    {(["file", "link"] as const).map(t => (
+                      <button key={t} onClick={() => { setUploadTab(t); setLinkError(""); }}
+                        style={{ padding: "7px 18px", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer",
+                          background: uploadTab === t ? "var(--fg)" : "var(--bg)", color: uploadTab === t ? "var(--bg)" : "var(--muted)" }}>
+                        {t === "file" ? "📁 Upload File" : "🔗 Paste Link"}
+                      </button>
+                    ))}
+                  </div>
 
-              {/* upload zone */}
-              {uploadTab === "file" ? (
-                <button onClick={uploadFile} disabled={busy} style={{
-                  width: "100%", padding: "40px 20px",
-                  border: "2px dashed var(--border)", borderRadius: 12,
-                  background: "#fafafa", cursor: "pointer", textAlign: "center",
-                  fontSize: 14, color: "var(--muted)",
-                  transition: "border-color 0.15s",
-                }}>
-                  {busy ? "Uploading…" : "Click to select a file (PDF, PPTX, XLSX, CSV)"}
-                </button>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <input className="input" type="url"
-                    placeholder="https://drive.google.com/file/d/... or direct PDF URL"
-                    value={linkUrl} onChange={e => { setLinkUrl(e.target.value); setLinkError(""); }} />
-                  {linkError && <p style={{ fontSize: 12, color: "var(--red)" }}>{linkError}</p>}
-                  <p className="hint">Supports Google Drive, Dropbox, or any direct PDF/PPTX/image link</p>
-                  <button className="btn btn-primary btn-sm" onClick={submitLink}
-                    disabled={busy || !linkUrl.trim().startsWith("http")}>
-                    {busy ? "⏳ Fetching…" : "🔗 Add Link"}
-                  </button>
-                </div>
+                  {/* upload zone */}
+                  {uploadTab === "file" ? (
+                    <button onClick={uploadFile} disabled={busy} style={{
+                      width: "100%", padding: "40px 20px",
+                      border: "2px dashed var(--border)", borderRadius: 12,
+                      background: "#fafafa", cursor: "pointer", textAlign: "center",
+                      fontSize: 14, color: "var(--muted)",
+                      transition: "border-color 0.15s",
+                    }}>
+                      {busy ? "⏳ Uploading…" : "Click to select a file (PDF, PPTX, XLSX, CSV)"}
+                    </button>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <input className="input" type="url"
+                        placeholder="https://drive.google.com/file/d/... or direct PDF URL"
+                        value={linkUrl} onChange={e => { setLinkUrl(e.target.value); setLinkError(""); }} />
+                      {linkError && <p style={{ fontSize: 12, color: "var(--red)" }}>{linkError}</p>}
+                      <p className="hint">Supports Google Drive, Dropbox, or any direct PDF/PPTX/image link</p>
+                      <button className="btn btn-primary btn-sm" onClick={submitLink}
+                        disabled={busy || !linkUrl.trim().startsWith("http")}>
+                        {busy ? "⏳ Fetching…" : "🔗 Add Link"}
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
 
-              {/* file list */}
+              {/* File uploaded — show with remove button */}
               {sub.files && sub.files.length > 0 && (
-                <div style={{ marginTop: 16 }}>
+                <div>
                   {sub.files.map(f => (
                     <div key={f.id} style={{
                       display: "flex", justifyContent: "space-between", alignItems: "center",
-                      padding: "8px 12px", borderRadius: 8, background: "#fafafa",
-                      marginBottom: 6, fontSize: 13,
+                      padding: "12px 14px", borderRadius: 10,
+                      background: "#f0fdf4", border: "1px solid #bbf7d0",
+                      marginBottom: 8, fontSize: 13,
                     }}>
-                      <span style={{ fontWeight: 500 }}>{f.file_name}</span>
-                      <span style={{ color: "var(--muted)", fontSize: 12 }}>{(f.size_bytes / 1024).toFixed(0)} KB</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ fontSize: 18 }}>📄</span>
+                        <div>
+                          <div style={{ fontWeight: 600, color: "var(--fg)" }}>{f.file_name}</div>
+                          <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 1 }}>{(f.size_bytes / 1024).toFixed(0)} KB · Ready to submit</div>
+                        </div>
+                      </div>
+                      <button
+                        disabled={busy}
+                        onClick={() => deleteUploadedFile(f.id)}
+                        style={{
+                          background: "none", border: "1px solid #fca5a5", borderRadius: 6,
+                          cursor: "pointer", padding: "4px 10px", fontSize: 12,
+                          color: "var(--red)", fontWeight: 600,
+                        }}
+                      >
+                        {busy ? "…" : "✕ Remove"}
+                      </button>
                     </div>
                   ))}
+                  <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
+                    Remove the file above to upload a different one.
+                  </p>
                 </div>
               )}
 
               <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-                <button className="btn btn-secondary btn-sm" onClick={uploadFile} disabled={busy}>
-                  + Add Another File
-                </button>
                 <button className="btn btn-primary" onClick={runPipeline}
                   disabled={!sub.files?.length || busy}>
-                  Submit &amp; Process
+                  {busy ? "Processing…" : "Submit & Process →"}
                 </button>
               </div>
             </div>

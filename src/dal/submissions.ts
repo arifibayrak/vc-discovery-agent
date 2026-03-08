@@ -14,6 +14,18 @@ export async function createSubmission(input: CreateSubmissionInput): Promise<Su
   return data as Submission;
 }
 
+export async function getSubmissionByEmail(email: string): Promise<Submission | null> {
+  const db = createServiceClient();
+  const { data } = await db
+    .from("submissions")
+    .select()
+    .eq("contact_email", email.toLowerCase().trim())
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data as Submission | null;
+}
+
 export async function getSubmission(id: string): Promise<Submission> {
   const db = createServiceClient();
   const { data, error } = await db

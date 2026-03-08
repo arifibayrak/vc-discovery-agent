@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
-import { errorResponse, ValidationError } from "@/lib/errors";
+import { errorResponse, ValidationError, ConflictError } from "@/lib/errors";
 import { CreateSubmissionSchema, SubmissionListQuerySchema } from "@/schemas/submission";
-import { createSubmission, listSubmissions } from "@/dal/submissions";
+import { createSubmission, listSubmissions, getSubmissionByEmail } from "@/dal/submissions";
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,6 +12,14 @@ export async function POST(request: NextRequest) {
       throw new ValidationError("Invalid submission data", {
         fields: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`),
       });
+    }
+
+    // Check for duplicate email
+    const existing = await getSubmissionByEmail(parsed.data.contact_email);
+    if (existing) {
+      throw new ConflictError(
+        `This email has already been used to submit an application. Each email can only submit once.`
+      );
     }
 
     const submission = await createSubmission(parsed.data);
