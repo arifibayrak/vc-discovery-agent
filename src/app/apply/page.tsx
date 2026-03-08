@@ -59,6 +59,11 @@ export default function ApplyPage() {
   const [form, setForm] = useState({ company_name: "", contact_name: "", contact_email: "" });
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [reuploadStatus, setReuploadStatus] = useState<Record<string, "idle" | "uploading" | "done">>({});
+  const [reuploadTab, setReuploadTab] = useState<Record<string, "file" | "link">>({});
+  const [reuploadLink, setReuploadLink] = useState<Record<string, string>>({});
+  const [uploadTab, setUploadTab] = useState<"file" | "link">("file");
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkError, setLinkError] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   function setAnswer(qid: string, val: string) {
@@ -77,28 +82,90 @@ export default function ApplyPage() {
     await refresh(sub.id);
   }
 
+  async function handlePitchRelink(qid: string, url: string) {
+    if (!sub) return;
+    setReuploadStatus(prev => ({ ...prev, [qid]: "uploading" }));
+    const r = await fetch(`/api/submissions/${sub.id}/files/link`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, file_type: "pitch_deck" }),
+    });
+    if (!r.ok) {
+      const d = await r.json();
+      setReuploadStatus(prev => ({ ...prev, [qid]: "idle" }));
+      setReuploadLink(prev => ({ ...prev, [qid]: d.error ?? "Failed to fetch link." }));
+      return;
+    }
+    setAnswer(qid, `Pitch deck linked: ${url}`);
+    setReuploadStatus(prev => ({ ...prev, [qid]: "done" }));
+    await refresh(sub.id);
+  }
+
+  async function submitLink() {
+    if (!sub || !linkUrl.trim()) return;
+    setLinkError("");
+    setBusy(true);
+    const r = await fetch(`/api/submissions/${sub.id}/files/link`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: linkUrl.trim(), file_type: "pitch_deck" }),
+    });
+    setBusy(false);
+    if (!r.ok) {
+      const d = await r.json();
+      setLinkError(d.error ?? "Failed to fetch the link.");
+      return;
+    }
+    setLinkUrl("");
+    await refresh(sub.id);
+  }
+
   function renderAnswerInput(q: FollowUpQuestion) {
     const val = answers[q.id] ?? "";
 
     /* ── Pitch deck re-upload ── */
     if (q.field_name === "is_pitch_deck") {
       const status = reuploadStatus[q.id] ?? "idle";
+      const tab = reuploadTab[q.id] ?? "file";
+      const linkVal = reuploadLink[q.id] ?? "";
+      if (status === "done") return (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 8, background: "#d1fae5", border: "1px solid #6ee7b7", fontSize: 13 }}>
+          <span style={{ color: "var(--green)", fontWeight: 700 }}>✓</span>
+          <span style={{ color: "#065f46" }}>{val}</span>
+        </div>
+      );
       return (
         <div>
           <input ref={fileInputRef} type="file" accept=".pdf,.pptx,.ppt"
             style={{ display: "none" }}
             onChange={e => { const f = e.target.files?.[0]; if (f) handlePitchReupload(q.id, f); }} />
-          {status === "done" ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 8, background: "#d1fae5", border: "1px solid #6ee7b7", fontSize: 13 }}>
-              <span style={{ color: "var(--green)", fontWeight: 700 }}>✓</span>
-              <span style={{ color: "#065f46" }}>{val}</span>
-            </div>
-          ) : (
+          {/* tab switcher */}
+          <div style={{ display: "flex", gap: 0, marginBottom: 10, border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", width: "fit-content" }}>
+            {(["file", "link"] as const).map(t => (
+              <button key={t} onClick={() => setReuploadTab(prev => ({ ...prev, [q.id]: t }))}
+                style={{ padding: "6px 16px", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer",
+                  background: tab === t ? "var(--fg)" : "var(--bg)", color: tab === t ? "var(--bg)" : "var(--muted)" }}>
+                {t === "file" ? "📎 Upload File" : "🔗 Paste Link"}
+              </button>
+            ))}
+          </div>
+          {tab === "file" ? (
             <button className="btn btn-secondary" style={{ width: "100%", padding: "18px", border: "2px dashed var(--border)", background: "#fafafa" }}
-              disabled={status === "uploading"}
-              onClick={() => fileInputRef.current?.click()}>
+              disabled={status === "uploading"} onClick={() => fileInputRef.current?.click()}>
               {status === "uploading" ? "⏳ Uploading…" : "📎 Click to upload your pitch deck (PDF or PPTX)"}
             </button>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <input className="input" type="url" placeholder="https://drive.google.com/... or direct PDF URL"
+                value={typeof linkVal === "string" && linkVal.startsWith("http") ? linkVal : ""}
+                onChange={e => setReuploadLink(prev => ({ ...prev, [q.id]: e.target.value }))} />
+              {typeof linkVal === "string" && !linkVal.startsWith("http") && linkVal && (
+                <p style={{ fontSize: 12, color: "var(--red)" }}>{linkVal}</p>
+              )}
+              <p className="hint">Supports Google Drive, Dropbox, or any direct PDF/PPTX link</p>
+              <button className="btn btn-primary btn-sm" disabled={status === "uploading" || !linkVal.startsWith("http")}
+                onClick={() => handlePitchRelink(q.id, linkVal)}>
+                {status === "uploading" ? "⏳ Fetching…" : "🔗 Link Pitch Deck"}
+              </button>
+            </div>
           )}
         </div>
       );
@@ -395,16 +462,41 @@ export default function ApplyPage() {
                 Upload your pitch deck, financial model, or other relevant documents.
               </p>
 
+              {/* tab switcher */}
+              <div style={{ display: "flex", gap: 0, marginBottom: 14, border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden", width: "fit-content" }}>
+                {(["file", "link"] as const).map(t => (
+                  <button key={t} onClick={() => { setUploadTab(t); setLinkError(""); }}
+                    style={{ padding: "7px 18px", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer",
+                      background: uploadTab === t ? "var(--fg)" : "var(--bg)", color: uploadTab === t ? "var(--bg)" : "var(--muted)" }}>
+                    {t === "file" ? "📁 Upload File" : "🔗 Paste Link"}
+                  </button>
+                ))}
+              </div>
+
               {/* upload zone */}
-              <button onClick={uploadFile} disabled={busy} style={{
-                width: "100%", padding: "40px 20px",
-                border: "2px dashed var(--border)", borderRadius: 12,
-                background: "#fafafa", cursor: "pointer", textAlign: "center",
-                fontSize: 14, color: "var(--muted)",
-                transition: "border-color 0.15s",
-              }}>
-                {busy ? "Uploading…" : "Click to select a file (PDF, PPTX, XLSX, CSV)"}
-              </button>
+              {uploadTab === "file" ? (
+                <button onClick={uploadFile} disabled={busy} style={{
+                  width: "100%", padding: "40px 20px",
+                  border: "2px dashed var(--border)", borderRadius: 12,
+                  background: "#fafafa", cursor: "pointer", textAlign: "center",
+                  fontSize: 14, color: "var(--muted)",
+                  transition: "border-color 0.15s",
+                }}>
+                  {busy ? "Uploading…" : "Click to select a file (PDF, PPTX, XLSX, CSV)"}
+                </button>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <input className="input" type="url"
+                    placeholder="https://drive.google.com/file/d/... or direct PDF URL"
+                    value={linkUrl} onChange={e => { setLinkUrl(e.target.value); setLinkError(""); }} />
+                  {linkError && <p style={{ fontSize: 12, color: "var(--red)" }}>{linkError}</p>}
+                  <p className="hint">Supports Google Drive, Dropbox, or any direct PDF/PPTX/image link</p>
+                  <button className="btn btn-primary btn-sm" onClick={submitLink}
+                    disabled={busy || !linkUrl.trim().startsWith("http")}>
+                    {busy ? "⏳ Fetching…" : "🔗 Add Link"}
+                  </button>
+                </div>
+              )}
 
               {/* file list */}
               {sub.files && sub.files.length > 0 && (
