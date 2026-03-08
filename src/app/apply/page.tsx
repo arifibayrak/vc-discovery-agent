@@ -57,6 +57,7 @@ export default function ApplyPage() {
   const [sub, setSub] = useState<Submission | null>(null);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ company_name: "", contact_name: "", contact_email: "" });
+  const [formError, setFormError] = useState("");
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [reuploadStatus, setReuploadStatus] = useState<Record<string, "idle" | "uploading" | "done">>({});
   const [reuploadTab, setReuploadTab] = useState<Record<string, "file" | "link">>({});
@@ -71,7 +72,7 @@ export default function ApplyPage() {
   }
 
   async function handlePitchReupload(qid: string, file: File) {
-    if (!sub) return;
+    if (!sub?.id) return;
     setReuploadStatus(prev => ({ ...prev, [qid]: "uploading" }));
     const fd = new FormData();
     fd.append("file", file);
@@ -83,7 +84,7 @@ export default function ApplyPage() {
   }
 
   async function handlePitchRelink(qid: string, url: string) {
-    if (!sub) return;
+    if (!sub?.id) return;
     setReuploadStatus(prev => ({ ...prev, [qid]: "uploading" }));
     const r = await fetch(`/api/submissions/${sub.id}/files/link`, {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -101,7 +102,7 @@ export default function ApplyPage() {
   }
 
   async function submitLink() {
-    if (!sub || !linkUrl.trim()) return;
+    if (!sub?.id || !linkUrl.trim()) return;
     setLinkError("");
     setBusy(true);
     const r = await fetch(`/api/submissions/${sub.id}/files/link`, {
@@ -252,19 +253,29 @@ export default function ApplyPage() {
   }, []);
 
   async function createSubmission() {
+    setFormError("");
     setBusy(true);
-    const r = await fetch("/api/submissions", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    const data = await r.json();
-    setSub(data);
-    setStep("upload");
-    setBusy(false);
+    try {
+      const r = await fetch("/api/submissions", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const data = await r.json();
+      if (!r.ok || !data?.id) {
+        setFormError(data?.error ?? "Failed to create submission. Please try again.");
+        return;
+      }
+      setSub(data);
+      setStep("upload");
+    } catch {
+      setFormError("Network error. Please check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   function uploadFile() {
-    if (!sub) return;
+    if (!sub?.id) return;
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".pdf,.pptx,.xlsx,.xls,.csv,.png,.jpg,.jpeg";
@@ -287,7 +298,7 @@ export default function ApplyPage() {
   }
 
   async function runPipeline() {
-    if (!sub) return;
+    if (!sub?.id) return;
     setBusy(true);
     setStep("processing");
 
@@ -314,7 +325,7 @@ export default function ApplyPage() {
   }
 
   async function submitAnswers() {
-    if (!sub) return;
+    if (!sub?.id) return;
     const pending = sub.follow_up_questions?.filter(q => q.status === "pending") ?? [];
     const batch = pending.filter(q => answers[q.id]?.trim()).map(q => ({ question_id: q.id, answer: answers[q.id] }));
     if (!batch.length) return;
@@ -440,8 +451,13 @@ export default function ApplyPage() {
                   <input className="input" type="email" placeholder="e.g. jane@acme.ai" value={form.contact_email}
                     onChange={e => setForm({ ...form, contact_email: e.target.value })} />
                 </div>
+                {formError && (
+                  <div style={{ padding: "10px 14px", borderRadius: 8, background: "#fef2f2", border: "1px solid #fca5a5", fontSize: 13, color: "#dc2626" }}>
+                    ⚠️ {formError}
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                  <button className="btn btn-secondary btn-sm" onClick={() => { setStep("choose"); setMode(null); }}>Back</button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => { setStep("choose"); setMode(null); setFormError(""); }}>Back</button>
                   <button className="btn btn-primary" onClick={createSubmission}
                     disabled={!form.company_name || !form.contact_name || !form.contact_email || busy}>
                     {busy ? "Creating…" : "Continue"}
